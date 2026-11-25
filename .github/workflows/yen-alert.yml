@@ -1,0 +1,34 @@
+name: yen-alert
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # 10분마다 실행 (GitHub 사정상 몇 분 지연될 수 있음)
+  workflow_dispatch:          # 수동 실행 버튼
+
+permissions:
+  contents: write             # state.json 커밋을 위해 필요
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run yen check
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          THRESHOLD: "900"
+          CHANGE_ALERT: "3"
+        run: python check.py
+
+      - name: Save state
+        run: |
+          git config user.name "yen-bot"
+          git config user.email "yen-bot@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || (git commit -m "update state" && git push)
