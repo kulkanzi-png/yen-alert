@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="엔화알림">
+<meta name="theme-color" content="#1f2937">
+<title>엔화 알림</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f5f6f8; --card:#fff; --text:#111827; --sub:#6b7280; --accent:#2563eb; --down:#2563eb; --up:#dc2626; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f172a; --card:#1e293b; --text:#f1f5f9; --sub:#94a3b8; --accent:#60a5fa; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif; background:var(--bg); color:var(--text);
+         padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom); }
+  .wrap { max-width: 480px; margin: 0 auto; padding-top: 16px; }
+  h1 { font-size: 20px; margin: 8px 0 16px; }
+  .card { background:var(--card); border-radius:16px; padding:20px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .label { font-size:13px; color:var(--sub); }
+  .rate { font-size:36px; font-weight:700; margin:6px 0 4px; }
+  .change { font-size:15px; font-weight:600; }
+  .up { color:var(--up); } .down { color:var(--down); }
+  .meta { font-size:12px; color:var(--sub); margin-top:8px; }
+  label { display:block; font-size:14px; margin-bottom:6px; }
+  input { width:100%; padding:12px; font-size:18px; border:1px solid #d1d5db; border-radius:10px; background:transparent; color:var(--text); }
+  button { width:100%; margin-top:12px; padding:14px; font-size:16px; font-weight:600; border:none; border-radius:10px; background:var(--accent); color:#fff; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  .status { font-size:13px; color:var(--sub); margin-top:8px; min-height:18px; }
+  .hist { list-style:none; padding:0; margin:0; font-size:14px; }
+  .hist li { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid rgba(127,127,127,.2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>💴 엔화 알림</h1>
+
+  <div class="card">
+    <div class="label">현재 100엔 = 원화</div>
+    <div class="rate" id="rate">--</div>
+    <div class="change" id="change"></div>
+    <div class="meta" id="updated">불러오는 중...</div>
+  </div>
+
+  <div class="card">
+    <label for="threshold">알림 기준 (100엔당 원, 이하일 때 알림)</label>
+    <input id="threshold" type="number" step="0.1" inputmode="decimal" placeholder="예: 900">
+    <button id="save">기준 저장 및 알림 켜기</button>
+    <button id="refresh" class="secondary">지금 새로고침</button>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="card">
+    <div class="label" style="margin-bottom:8px">최근 기록</div>
+    <ul class="hist" id="hist"></ul>
+  </div>
+</div>
+
+<script>
+const API = "https://open.er-api.com/v6/latest/JPY";
+const INTERVAL = 10 * 60 * 1000; // 10분
+const $ = (id) => document.getElementById(id);
+
+let lastRate = null;
+let history = JSON.parse(localStorage.getItem("yen-history") || "[]");
+let threshold = parseFloat(localStorage.getItem("yen-threshold"));
+let alerted = false;
+
+if (!isNaN(threshold)) $("threshold").value = threshold;
+
+function notify(title, body) {
+  if ("Notification" in window && Notification.permission === "granted") {
+    new Notification(title, { body });
+  } else {
+    $("status").textContent = "알림 권한이 없습니다. 브라우저/앱 설정에서 허용해 주세요.";
+  }
+}
+
+async function fetchRate() {
+  try {
+    const res = await fetch(API, { cache: "no-store" });
+    const data = await res.json();
+    const rate = data.rates.KRW * 100;
+    const now = new Date();
+    const time = now.toLocaleString("ko-KR", { month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit" });
+
+    $("rate").textContent = rate.toFixed(2) + "원";
+    if (lastRate !== null) {
+      const diff = rate - lastRate;
+      const cls = diff >= 0 ? "up" : "down";
+      $("change").innerHTML = `<span class="${cls}">${diff >= 0 ? "▲" : "▼"} ${Math.abs(diff).toFixed(2)}원 (직전 대비)</span>`;
+    }
+    $("updated").textContent = `마지막 확인: ${time} · 다음 확인: 10분 후`;
+
+    history.unshift({ time, rate: rate.toFixed(2) });
+    history = history.slice(0, 20);
+    localStorage.setItem("yen-history", JSON.stringify(history));
+    renderHistory();
+
+    if (!isNaN(threshold)) {
+      if (rate <= threshold && !alerted) {
+        notify("엔화 기준 이하", `100엔 = ${rate.toFixed(2)}원 (기준 ${threshold}원)`);
+        alerted = true;
+      } else if (rate > threshold) {
+        alerted = false;
+      }
+    }
+    lastRate = rate;
+  } catch (e) {
+    $("updated").textContent = "환율 조회 실패. 네트워크를 확인해 주세요.";
+  }
+}
+
+function renderHistory() {
+  $("hist").innerHTML = history.map(h => `<li><span>${h.time}</span><span>${h.rate}원</span></li>`).join("");
+}
+
+$("save").onclick = async () => {
+  const v = parseFloat($("threshold").value);
+  if (isNaN(v)) { $("status").textContent = "기준 금액을 입력해 주세요."; return; }
+  threshold = v;
+  localStorage.setItem("yen-threshold", v);
+  alerted = false;
+  if ("Notification" in window && Notification.permission !== "granted") {
+    const p = await Notification.requestPermission();
+    $("status").textContent = p === "granted" ? `기준 ${v}원으로 저장했습니다.` : "알림 권한이 거부되어 화면 확인만 가능합니다.";
+  } else {
+    $("status").textContent = `기준 ${v}원으로 저장했습니다.`;
+  }
+  fetchRate();
+};
+
+$("refresh").onclick = () => fetchRate();
+
+renderHistory();
+fetchRate();
+setInterval(fetchRate, INTERVAL);
+</script>
+</body>
+</html>
